@@ -38,7 +38,9 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    task = db.query(Task).filter(Task.id == task_id, Task.owner_id == current_user.id).first()
+    task = db.query(Task).filter(
+        Task.id == task_id, Task.owner_id == current_user.id
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -48,13 +50,25 @@ def update_task(
     return task
 
 
+@router.delete("/", status_code=204)
+def delete_all_tasks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete every task belonging to the current user."""
+    db.query(Task).filter(Task.owner_id == current_user.id).delete()
+    db.commit()
+
+
 @router.delete("/{task_id}", status_code=204)
 def delete_task(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    task = db.query(Task).filter(Task.id == task_id, Task.owner_id == current_user.id).first()
+    task = db.query(Task).filter(
+        Task.id == task_id, Task.owner_id == current_user.id
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     db.delete(task)
