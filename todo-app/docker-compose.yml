@@ -5,11 +5,11 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./backend/todo.db:/app/todo.db
+      - ./backend/data:/app/data
     env_file:
       - ./backend/.env
     environment:
-      - DATABASE_URL=sqlite:////app/todo.db
+      - DATABASE_URL=sqlite:////app/data/todo.db
 
   frontend:
     build: ./frontend
