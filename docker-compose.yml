@@ -1,18 +1,23 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./todo-app/backend
+      dockerfile: dockerfile
     container_name: todo_backend
     ports:
       - "8081:8081"
     volumes:
-      - ./backend/data:/app/data
+      - ./todo-app/backend/data:/app/data
     env_file:
-      - ./backend/.env
+      - ./todo-app/backend/.env
     environment:
       - DATABASE_URL=sqlite:////app/data/todo.db
+    restart: always
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./todo-app/frontend
+      dockerfile: dockerfile
     container_name: todo_frontend
     ports:
       - "8502:8501"
@@ -20,3 +25,4 @@ services:
       - API_URL=http://backend:8081
     depends_on:
       - backend
+    restart: always
