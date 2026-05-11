@@ -2,6 +2,7 @@ import os
 import requests
 import streamlit as st
 from datetime import datetime, date
+import html  # Додано для екранування HTML та уникнення XSS/злому верстки
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
@@ -21,8 +22,9 @@ html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
 }
 
-/* Hide Streamlit branding */
-#MainMenu, footer, header { visibility: hidden; }
+/* Hide Streamlit branding but KEEP the header visible so the sidebar toggle works! */
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stHeader"] { background: transparent !important; }
 .stDeployButton { display: none; }
 
 /* App background */
@@ -211,7 +213,6 @@ h2, h3 { color: #e0e0ee !important; font-weight: 500 !important; }
     color: #fff !important;
     border: none !important;
     border-radius: 8px !important;
-    font-weight: 500 !important;
     width: 100%;
 }
 
@@ -304,7 +305,7 @@ h2, h3 { color: #e0e0ee !important; font-weight: 500 !important; }
 DEFAULTS = {
     "token": None,
     "user_email": None,
-    "view": "tasks",        # tasks | stats | settings
+    "view": "tasks",  # tasks | stats | settings
     "edit_task_id": None,
     "search_query": "",
     "sort_by": "created",
@@ -314,14 +315,14 @@ for k, v in DEFAULTS.items():
         st.session_state[k] = v
 
 STATUS_META = {
-    "todo":        {"label": "To do",       "icon": "○", "color": "#9e9ec0"},
+    "todo": {"label": "To do", "icon": "○", "color": "#9e9ec0"},
     "in_progress": {"label": "In progress", "icon": "◑", "color": "#82b1ff"},
-    "done":        {"label": "Done",        "icon": "●", "color": "#69f0ae"},
+    "done": {"label": "Done", "icon": "●", "color": "#69f0ae"},
 }
 PRIORITY_META = {
-    "high":   {"label": "High",   "icon": "↑", "badge_class": "badge-high"},
+    "high": {"label": "High", "icon": "↑", "badge_class": "badge-high"},
     "medium": {"label": "Medium", "icon": "→", "badge_class": "badge-medium"},
-    "low":    {"label": "Low",    "icon": "↓", "badge_class": "badge-low"},
+    "low": {"label": "Low", "icon": "↓", "badge_class": "badge-low"},
 }
 STATUS_VALUES = list(STATUS_META.keys())
 PRIORITY_VALUES = list(PRIORITY_META.keys())
@@ -344,10 +345,15 @@ def handle_error(resp):
 
 
 def fetch_tasks():
-    resp = requests.get(f"{API_URL}/tasks/", headers=api_headers())
-    if handle_error(resp):
+    try:
+        # Оптимізовано: додано timeout для запобігання зависанню при падінні бекенду
+        resp = requests.get(f"{API_URL}/tasks/", headers=api_headers(), timeout=10)
+        if handle_error(resp):
+            return []
+        return resp.json()
+    except requests.exceptions.RequestException:
+        st.error("❌ Не вдалося з'єднатися з API. Перевірте, чи працює бекенд.")
         return []
-    return resp.json()
 
 
 def task_stats(tasks):
@@ -435,7 +441,7 @@ def render_sidebar(tasks):
         st.markdown(f"""
         <div style='padding: 0.5rem 0 1rem;'>
             <div style='font-size:22px; font-family:"DM Serif Display",serif; color:#e0e0ff; margin-bottom:2px;'>✦ Taskflow</div>
-            <div style='font-size:13px; color:#5a5a7a; border-bottom:1px solid #2a2a38; padding-bottom:1rem;'>{st.session_state.user_email}</div>
+            <div style='font-size:13px; color:#5a5a7a; border-bottom:1px solid #2a2a38; padding-bottom:1rem;'>{html.escape(st.session_state.user_email or "")}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -474,19 +480,24 @@ def render_sidebar(tasks):
 
         st.markdown("<div style='margin:1rem 0; border-top:1px solid #2a2a38;'></div>", unsafe_allow_html=True)
 
-        # Share
-        st.markdown("<div style='font-size:13px; color:#6a6a8a; font-weight:500; margin-bottom:8px;'>Share via Email</div>", unsafe_allow_html=True)
-        with st.form("share_form"):
-            share_email = st.text_input("Recipient", placeholder="colleague@company.com", label_visibility="collapsed")
-            share_submitted = st.form_submit_button("Send list", use_container_width=True)
-        if share_submitted and share_email:
-            resp = requests.post(
-                f"{API_URL}/tasks/share",
-                json={"email": share_email},
-                headers=api_headers(),
-            )
-            if not handle_error(resp):
-                st.success(f"✓ Sent to {share_email}")
+        # Share (Виправлено: тепер це спливаюче віконечко/popover, як ти просив)
+        with st.popover("✉️ Share via Email", use_container_width=True):
+            st.markdown("<div style='font-size:14px; font-weight:500; color:#c8c8d8; margin-bottom:10px;'>Send task list</div>", unsafe_allow_html=True)
+            with st.form("share_form", clear_on_submit=True):
+                share_email = st.text_input("Recipient", placeholder="colleague@company.com", label_visibility="collapsed")
+                share_submitted = st.form_submit_button("Send", use_container_width=True)
+            if share_submitted and share_email:
+                try:
+                    resp = requests.post(
+                        f"{API_URL}/tasks/share",
+                        json={"email": share_email},
+                        headers=api_headers(),
+                        timeout=10
+                    )
+                    if not handle_error(resp):
+                        st.success(f"✓ Sent to {share_email}")
+                except Exception:
+                    st.error("Failed to share.")
 
         st.markdown("<div style='flex:1'></div>", unsafe_allow_html=True)
         st.markdown("<div style='margin:1rem 0 0.5rem; border-top:1px solid #2a2a38;'></div>", unsafe_allow_html=True)
@@ -499,17 +510,18 @@ def render_sidebar(tasks):
 # ── Tasks page ─────────────────────────────────────────────────────────────────
 def tasks_page(tasks):
     st.markdown("<h1 style='margin-bottom:0.2rem;'>My Tasks</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#5a5a7a; margin-top:0; font-size:14px;'>{date.today().strftime('%A, %B %d')}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#5a5a7a; margin-top:0; font-size:14px;'>{date.today().strftime('%A, %B %d')}</p>",
+                unsafe_allow_html=True)
 
     # ── Stats row ──
     if tasks:
         total, done, in_prog, todo, pct = task_stats(tasks)
         c1, c2, c3, c4 = st.columns(4)
         for col, num, label, clr in [
-            (c1, total,   "Total",       "#a29bfe"),
-            (c2, todo,    "To do",       "#9e9ec0"),
+            (c1, total, "Total", "#a29bfe"),
+            (c2, todo, "To do", "#9e9ec0"),
             (c3, in_prog, "In progress", "#82b1ff"),
-            (c4, done,    "Done",        "#69f0ae"),
+            (c4, done, "Done", "#69f0ae"),
         ]:
             with col:
                 st.markdown(f"""
@@ -528,10 +540,10 @@ def tasks_page(tasks):
             col_s, col_p, col_d = st.columns(3)
             with col_s:
                 status = st.selectbox("Status", STATUS_VALUES,
-                    format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}")
+                                      format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}")
             with col_p:
                 priority = st.selectbox("Priority", PRIORITY_VALUES,
-                    format_func=lambda p: f"{PRIORITY_META[p]['icon']} {PRIORITY_META[p]['label']}")
+                                        format_func=lambda p: f"{PRIORITY_META[p]['icon']} {PRIORITY_META[p]['label']}")
             with col_d:
                 due_date = st.date_input("Due date", value=None)
             tags_raw = st.text_input("Tags", placeholder="design, frontend, bug  (comma-separated)")
@@ -550,10 +562,13 @@ def tasks_page(tasks):
                     "due_date": str(due_date) if due_date else None,
                     "tags": tags,
                 }
-                resp = requests.post(f"{API_URL}/tasks/", json=payload, headers=api_headers())
-                if not handle_error(resp):
-                    st.success("✓ Task added!")
-                    st.rerun()
+                try:
+                    resp = requests.post(f"{API_URL}/tasks/", json=payload, headers=api_headers(), timeout=10)
+                    if not handle_error(resp):
+                        st.success("✓ Task added!")
+                        st.rerun()
+                except Exception:
+                    st.error("Cannot connect to API.")
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
@@ -576,7 +591,7 @@ def tasks_page(tasks):
     with col_sort:
         sort_by = st.selectbox("Sort", ["created", "priority", "due_date", "title"], label_visibility="collapsed",
                                format_func=lambda s: {"created": "Newest", "priority": "Priority",
-                                                       "due_date": "Due date", "title": "Title"}[s])
+                                                      "due_date": "Due date", "title": "Title"}[s])
         st.session_state.sort_by = sort_by
 
     # ── Status filter ──
@@ -604,7 +619,9 @@ def tasks_page(tasks):
     elif sort_by == "due_date":
         filtered = sorted(filtered, key=lambda t: t.get("due_date") or "9999")
 
-    st.markdown(f"<p style='color:#4a4a6a; font-size:13px; margin:0.5rem 0;'>{len(filtered)} task{'s' if len(filtered) != 1 else ''}</p>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='color:#4a4a6a; font-size:13px; margin:0.5rem 0;'>{len(filtered)} task{'s' if len(filtered) != 1 else ''}</p>",
+        unsafe_allow_html=True)
 
     # ── Task list ──
     for task in filtered:
@@ -617,6 +634,10 @@ def tasks_page(tasks):
 
         is_done = s == "done"
         title_style = "text-decoration:line-through; color:#5a5a7a;" if is_done else "color:#e0e0ee;"
+
+        # Оптимізація безпеки та верстки (екранування та формування рядків без порожніх абзаців)
+        safe_title = html.escape(task.get("title", ""))
+        safe_desc = html.escape(task.get("description", "")) if task.get("description") else ""
 
         # Due date formatting
         due_html = ""
@@ -637,50 +658,60 @@ def tasks_page(tasks):
                 due_html = ""
 
         tags_html = " ".join(
-            f"<span style='background:#1e1e38; color:#7a7aba; font-size:11px; padding:1px 7px; border-radius:12px; border:1px solid #2a2a4a;'>{tag}</span>"
+            f"<span style='background:#1e1e38; color:#7a7aba; font-size:11px; padding:1px 7px; border-radius:12px; border:1px solid #2a2a4a;'>{html.escape(tag)}</span>"
             for tag in tags
         ) if tags else ""
 
-        st.markdown(f"""
-        <div class="task-card">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-                <div style="flex:1;">
-                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:2px;">
-                        <span style="{title_style} font-size:15px; font-weight:500;">{task['title']}</span>
-                        <span class="badge {p_meta['badge_class']}">{p_meta['icon']} {p_meta['label']}</span>
-                        {due_html}
-                    </div>
-                    {f"<div style='color:#6a6a8a; font-size:13px; margin-top:4px;'>{task['description']}</div>" if task.get('description') else ""}
-                    {f"<div style='margin-top:8px; display:flex; gap:4px; flex-wrap:wrap;'>{tags_html}</div>" if tags_html else ""}
-                </div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <span style="color:{s_meta['color']}; font-size:13px; white-space:nowrap;">{s_meta['icon']} {s_meta['label']}</span>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Виправлення: збираємо HTML-блок без відкритого f-string форматування з переносами
+        card_html = (
+            f'<div class="task-card">'
+            f'<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">'
+            f'<div style="flex:1;">'
+            f'<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:2px;">'
+            f'<span style="{title_style} font-size:15px; font-weight:500;">{safe_title}</span>'
+            f'<span class="badge {p_meta["badge_class"]}">{p_meta["icon"]} {p_meta["label"]}</span>'
+            f'{due_html}'
+            f'</div>'
+        )
+
+        if safe_desc:
+            card_html += f"<div style='color:#6a6a8a; font-size:13px; margin-top:4px;'>{safe_desc}</div>"
+
+        if tags_html:
+            card_html += f"<div style='margin-top:8px; display:flex; gap:4px; flex-wrap:wrap;'>{tags_html}</div>"
+
+        card_html += (
+            f'</div>'
+            f'<div style="display:flex; align-items:center; gap:6px;">'
+            f'<span style="color:{s_meta["color"]}; font-size:13px; white-space:nowrap;">{s_meta["icon"]} {s_meta["label"]}</span>'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+        )
+
+        st.markdown(card_html, unsafe_allow_html=True)
 
         # Controls row
         col_s, col_p2, col_e, col_d = st.columns([3, 2, 1, 1])
         with col_s:
             new_status = st.selectbox("Status", STATUS_VALUES,
-                format_func=lambda x: f"{STATUS_META[x]['icon']} {STATUS_META[x]['label']}",
-                index=STATUS_VALUES.index(s),
-                key=f"status_{task['id']}",
-                label_visibility="collapsed")
+                                      format_func=lambda x: f"{STATUS_META[x]['icon']} {STATUS_META[x]['label']}",
+                                      index=STATUS_VALUES.index(s),
+                                      key=f"status_{task['id']}",
+                                      label_visibility="collapsed")
             if new_status != s:
                 requests.patch(f"{API_URL}/tasks/{task['id']}",
-                               json={"status": new_status}, headers=api_headers())
+                               json={"status": new_status}, headers=api_headers(), timeout=10)
                 st.rerun()
         with col_p2:
             new_prio = st.selectbox("Priority", PRIORITY_VALUES,
-                format_func=lambda x: f"{PRIORITY_META[x]['icon']} {PRIORITY_META[x]['label']}",
-                index=PRIORITY_VALUES.index(p) if p in PRIORITY_VALUES else 1,
-                key=f"prio_{task['id']}",
-                label_visibility="collapsed")
+                                    format_func=lambda x: f"{PRIORITY_META[x]['icon']} {PRIORITY_META[x]['label']}",
+                                    index=PRIORITY_VALUES.index(p) if p in PRIORITY_VALUES else 1,
+                                    key=f"prio_{task['id']}",
+                                    label_visibility="collapsed")
             if new_prio != p:
                 requests.patch(f"{API_URL}/tasks/{task['id']}",
-                               json={"priority": new_prio}, headers=api_headers())
+                               json={"priority": new_prio}, headers=api_headers(), timeout=10)
                 st.rerun()
         with col_e:
             if st.button("✎", key=f"edit_{task['id']}", help="Edit task"):
@@ -688,17 +719,19 @@ def tasks_page(tasks):
                 st.rerun()
         with col_d:
             if st.button("🗑", key=f"del_{task['id']}", help="Delete task"):
-                requests.delete(f"{API_URL}/tasks/{task['id']}", headers=api_headers())
+                requests.delete(f"{API_URL}/tasks/{task['id']}", headers=api_headers(), timeout=10)
                 st.rerun()
 
         # Inline edit form
         if st.session_state.edit_task_id == task["id"]:
             with st.form(f"edit_form_{task['id']}"):
-                st.markdown("<p style='color:#a29bfe; font-size:13px; margin-bottom:8px;'>✎ Editing task</p>", unsafe_allow_html=True)
+                st.markdown("<p style='color:#a29bfe; font-size:13px; margin-bottom:8px;'>✎ Editing task</p>",
+                            unsafe_allow_html=True)
                 new_title = st.text_input("Title", value=task["title"])
                 new_desc = st.text_area("Description", value=task.get("description") or "", height=80)
                 new_due = st.date_input("Due date",
-                    value=datetime.strptime(task["due_date"][:10], "%Y-%m-%d").date() if task.get("due_date") else None)
+                                        value=datetime.strptime(task["due_date"][:10], "%Y-%m-%d").date() if task.get(
+                                            "due_date") else None)
                 new_tags = st.text_input("Tags (comma-separated)", value=", ".join(task.get("tags", [])))
                 col_save, col_cancel = st.columns(2)
                 with col_save:
@@ -707,12 +740,15 @@ def tasks_page(tasks):
                     cancel = st.form_submit_button("Cancel", use_container_width=True)
             if save:
                 tags_list = [t.strip() for t in new_tags.split(",") if t.strip()]
-                requests.patch(f"{API_URL}/tasks/{task['id']}", json={
-                    "title": new_title,
-                    "description": new_desc or None,
-                    "due_date": str(new_due) if new_due else None,
-                    "tags": tags_list,
-                }, headers=api_headers())
+                try:
+                    requests.patch(f"{API_URL}/tasks/{task['id']}", json={
+                        "title": new_title,
+                        "description": new_desc or None,
+                        "due_date": str(new_due) if new_due else None,
+                        "tags": tags_list,
+                    }, headers=api_headers(), timeout=10)
+                except Exception:
+                    pass
                 st.session_state.edit_task_id = None
                 st.rerun()
             if cancel:
@@ -747,9 +783,9 @@ def stats_page(tasks):
 
     c1, c2, c3 = st.columns(3)
     for col, val, lbl, clr in [
-        (c1, todo,    "To do",       "#9e9ec0"),
+        (c1, todo, "To do", "#9e9ec0"),
         (c2, in_prog, "In progress", "#82b1ff"),
-        (c3, done,    "Done",        "#69f0ae"),
+        (c3, done, "Done", "#69f0ae"),
     ]:
         with col:
             bar_pct = int(val / total * 100) if total else 0
@@ -796,9 +832,10 @@ def stats_page(tasks):
     if overdue:
         st.markdown(f"<h3 style='color:#f48fb1;'>⚠ Overdue ({len(overdue)})</h3>", unsafe_allow_html=True)
         for t in overdue:
+            safe_overdue_title = html.escape(t['title'])
             st.markdown(f"""
             <div class='task-card' style='border-color:#5c2d3d;'>
-                <span style='color:#f48fb1; font-size:14px; font-weight:500;'>{t['title']}</span>
+                <span style='color:#f48fb1; font-size:14px; font-weight:500;'>{safe_overdue_title}</span>
                 <span style='color:#6a4a55; font-size:12px; margin-left:8px;'>due {t['due_date'][:10]}</span>
             </div>
             """, unsafe_allow_html=True)
@@ -814,7 +851,7 @@ def settings_page():
     st.markdown(f"""
     <div class='task-card'>
         <div style='color:#7a7a9a; font-size:12px; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:4px;'>Logged in as</div>
-        <div style='color:#e0e0ee; font-size:15px; font-weight:500;'>{st.session_state.user_email}</div>
+        <div style='color:#e0e0ee; font-size:15px; font-weight:500;'>{html.escape(st.session_state.user_email or "")}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -830,13 +867,17 @@ def settings_page():
         elif len(new_pass) < 8:
             st.warning("Password must be at least 8 characters.")
         else:
-            resp = requests.post(
-                f"{API_URL}/auth/change-password",
-                json={"old_password": old_pass, "new_password": new_pass},
-                headers=api_headers(),
-            )
-            if not handle_error(resp):
-                st.success("✓ Password updated.")
+            try:
+                resp = requests.post(
+                    f"{API_URL}/auth/change-password",
+                    json={"old_password": old_pass, "new_password": new_pass},
+                    headers=api_headers(),
+                    timeout=10
+                )
+                if not handle_error(resp):
+                    st.success("✓ Password updated.")
+            except Exception:
+                st.error("Cannot connect to API.")
 
     st.markdown("<h3>Danger Zone</h3>", unsafe_allow_html=True)
     st.markdown("""
@@ -846,10 +887,13 @@ def settings_page():
     </div>
     """, unsafe_allow_html=True)
     if st.button("🗑 Delete all tasks", use_container_width=True):
-        resp = requests.delete(f"{API_URL}/tasks/", headers=api_headers())
-        if not handle_error(resp):
-            st.success("All tasks deleted.")
-            st.rerun()
+        try:
+            resp = requests.delete(f"{API_URL}/tasks/", headers=api_headers(), timeout=10)
+            if not handle_error(resp):
+                st.success("All tasks deleted.")
+                st.rerun()
+        except Exception:
+            st.error("Cannot connect to API.")
 
 
 # ── Main app ───────────────────────────────────────────────────────────────────
