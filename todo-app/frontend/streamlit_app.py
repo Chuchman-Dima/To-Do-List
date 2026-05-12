@@ -4,7 +4,7 @@ import streamlit as st
 from datetime import datetime, date
 import html  # Додано для екранування HTML та уникнення XSS/злому верстки
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_URL = st.secrets.get("API_URL", os.getenv("API_URL", "http://localhost:8081"))
 
 st.set_page_config(
     page_title="Taskflow",
