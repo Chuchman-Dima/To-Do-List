@@ -46,8 +46,19 @@ def send_task_list_email(to_email: str, tasks: list, from_user_email: str) -> No
     msg["To"] = to_email
     msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
+    try:
+        # Примусово конвертуємо порт у int про всяк випадок
+        with smtplib.SMTP(settings.SMTP_HOST, int(settings.SMTP_PORT)) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
+            print(f"✅ Успішно відправлено лист на {to_email}")
+
+    except smtplib.SMTPAuthenticationError:
+        print(
+            "❌ Помилка авторизації SMTP: неправильний логін або пароль. Переконайся, що в паролі додатку Gmail немає пробілів!")
+        raise
+    except Exception as e:
+        print(f"❌ Критична помилка відправки листа: {e}")
+        raise
