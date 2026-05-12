@@ -68,6 +68,11 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+.env
+todo-app/.env
+todo-app/backend/.env
+todo-app/frontend/.env
+
 # Sphinx documentation
 docs/_build/
 
